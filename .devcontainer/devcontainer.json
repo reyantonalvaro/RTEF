@@ -1,8 +1,9 @@
 {
   "name": "Lightweight Linux Dev Environment",
-  "image": "mcr.microsoft.com/devcontainers/base:alpine",
+  "image": "mcr.microsoft.com/devcontainers/base:alpine-3.17",
   "features": {
     "ghcr.io/devcontainers/features/python:1": {}
   },
-  "postCreateCommand": "sudo apk add --no-cache gcc g++ make musl-dev"
+  "postCreateCommand": "sudo apk add --no-cache gcc g++ make musl-dev",
+  "postStartCommand": "sh .devcontainer/verify-setup.sh"
 }
