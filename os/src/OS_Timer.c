@@ -22,6 +22,8 @@ typedef struct {
     OS_StateHandler OwnerState;   /**< State that created this timer. */
     OS_U16          Generation;   /**< Stale-handle detection.        */
     OS_I16          NextFree;     /**< Free-list link (-1 = end).     */
+    OS_I16          NextHsm;      /**< Per-HSM list forward link.     */
+    OS_I16          PrevHsm;      /**< Per-HSM list backward link.    */
     bool            Active;       /**< true while timer is running.   */
 } TimerBlock;
 
@@ -50,7 +52,19 @@ static volatile OS_U32 TickCounter;
  */
 static void TimerFree(OS_U16 idx)
 {
+    /* Unlink from per-HSM doubly-linked list. */
+    if (Pool[idx].PrevHsm >= 0) {
+        Pool[(OS_U16)Pool[idx].PrevHsm].NextHsm = Pool[idx].NextHsm;
+    } else {
+        Pool[idx].Hook->TimerHead = Pool[idx].NextHsm;
+    }
+    if (Pool[idx].NextHsm >= 0) {
+        Pool[(OS_U16)Pool[idx].NextHsm].PrevHsm = Pool[idx].PrevHsm;
+    }
+
     Pool[idx].Active   = false;
+    Pool[idx].NextHsm  = -1;
+    Pool[idx].PrevHsm  = -1;
     Pool[idx].NextFree = FreeHead;
     FreeHead           = (OS_I16)idx;
 }
@@ -85,6 +99,8 @@ void OS_TimerInit(void)
         Pool[i].Active     = false;
         Pool[i].Generation = 0U;
         Pool[i].NextFree   = (OS_I16)(i + 1);
+        Pool[i].NextHsm    = -1;
+        Pool[i].PrevHsm    = -1;
     }
     Pool[OS_MAX_TIMERS - 1U].NextFree = -1;
 
@@ -99,7 +115,6 @@ OS_TimerHandle OS_TimerCreate(OS_Hsm *me, OS_Signal signal,
 {
     OS_TimerHandle handle;
     OS_U16         idx;
-    OS_U16         j;
 
     Q_ASSERT(me != (OS_Hsm *)0);
     Q_ASSERT(me->Initialized);
@@ -107,11 +122,13 @@ OS_TimerHandle OS_TimerCreate(OS_Hsm *me, OS_Signal signal,
 
     Port_CriticalEnter();
 
-    /* Reject duplicate: same hook + same signal already active. */
-    for (j = 0U; j < (OS_U16)OS_MAX_TIMERS; j++) {
-        Q_ASSERT(!(Pool[j].Active
-                    && (Pool[j].Hook == me)
-                    && (Pool[j].Signal == signal)));
+    /* Reject duplicate: walk only this HSM's active-timer list. */
+    {
+        OS_I16 cur = me->TimerHead;
+        while (cur >= 0) {
+            Q_ASSERT(Pool[(OS_U16)cur].Signal != signal);
+            cur = Pool[(OS_U16)cur].NextHsm;
+        }
     }
 
     /* Allocate from free list – O(1). */
@@ -127,6 +144,14 @@ OS_TimerHandle OS_TimerCreate(OS_Hsm *me, OS_Signal signal,
     Pool[idx].OwnerState = me->State[OS_HsmGetDispatchDepth()];
     Pool[idx].Generation = Pool[idx].Generation + 1U;
     Pool[idx].Active     = true;
+
+    /* Insert at head of per-HSM list – O(1). */
+    Pool[idx].NextHsm = me->TimerHead;
+    Pool[idx].PrevHsm = -1;
+    if (me->TimerHead >= 0) {
+        Pool[(OS_U16)me->TimerHead].PrevHsm = (OS_I16)idx;
+    }
+    me->TimerHead = (OS_I16)idx;
 
     handle.Index      = idx;
     handle.Generation = Pool[idx].Generation;
@@ -163,17 +188,18 @@ void OS_TimerDelete(OS_TimerHandle handle)
 /* ------------------------------------------------------------------ */
 void OS_TimerDeleteByState(OS_Hsm *hook, OS_StateHandler state)
 {
-    OS_U16 i;
+    OS_I16 cur;
+    OS_I16 next;
 
     Port_CriticalEnter();
 
-    for (i = 0U; i < (OS_U16)OS_MAX_TIMERS; i++) {
-        if (Pool[i].Active
-            && (Pool[i].Hook == hook)
-            && (Pool[i].OwnerState == state))
-        {
-            TimerFree(i);
+    cur = hook->TimerHead;
+    while (cur >= 0) {
+        next = Pool[(OS_U16)cur].NextHsm;
+        if (Pool[(OS_U16)cur].OwnerState == state) {
+            TimerFree((OS_U16)cur);
         }
+        cur = next;
     }
 
     Port_CriticalExit();

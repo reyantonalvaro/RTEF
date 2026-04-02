@@ -20,6 +20,7 @@
  */
 struct OS_Hsm {
     OS_StateHandler State[OS_HSM_MAX_DEPTH]; /**< Active handler per depth. */
+    OS_I16          TimerHead;                /**< Per-HSM active-timer list.*/
     OS_U8           Depth;                    /**< Deepest active level.     */
     bool            Initialized;              /**< Double-init guard.        */
 };
