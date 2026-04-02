@@ -22,4 +22,11 @@ build run: run app
 build clean: clean_rule
   pool = console
 
+rule all_rule
+  command = ninja clean && ninja && ninja run
+  description = Clean + Compile + Run
+  pool = console
+
+build all: all_rule
+
 default app
