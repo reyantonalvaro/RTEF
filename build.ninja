@@ -1,32 +1,33 @@
 cc = clang
 cflags = -std=c11 -Wall -Wextra -O2
 ldflags = -fuse-ld=mold
+builddir = build
 
 rule compile
-  command = $cc $cflags $ldflags -o $out $in
-  description = Compiling $in
+  command = mkdir -p $builddir && $cc $cflags $ldflags -o $out $in
+  description = Compiling $in → $out
 
-rule run
+rule run_rule
   command = ./$in
   description = Running $in
   pool = console
 
 rule clean_rule
-  command = rm -f app
+  command = rm -f $builddir/app
   description = Cleaning build artifacts
 
-build app: compile src/main.c
+rule all_rule
+  command = rm -f $builddir/app && mkdir -p $builddir && $cc $cflags $ldflags -o $builddir/app src/main.c && ./$builddir/app
+  description = Clean + Compile + Run
+  pool = console
 
-build run: run app
+build $builddir/app: compile src/main.c
+
+build run: run_rule $builddir/app
 
 build clean: clean_rule
   pool = console
 
-rule all_rule
-  command = ninja clean && ninja && ninja run
-  description = Clean + Compile + Run
-  pool = console
-
 build all: all_rule
 
-default app
+default $builddir/app
