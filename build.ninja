@@ -1,0 +1,32 @@
+cc = clang
+cflags = -std=c11 -Wall -Wextra -O2
+ldflags = -fuse-ld=mold
+
+rule compile
+  command = $cc $cflags $ldflags -o $out $in
+  description = Compiling $in
+
+rule run
+  command = ./$in
+  description = Running $in
+  pool = console
+
+rule clean_rule
+  command = rm -f app
+  description = Cleaning build artifacts
+
+build app: compile src/main.c
+
+build run: run app
+
+build clean: clean_rule
+  pool = console
+
+rule all_rule
+  command = ninja clean && ninja && ninja run
+  description = Clean + Compile + Run
+  pool = console
+
+build all: all_rule
+
+default app

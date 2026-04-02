@@ -1,0 +1,8 @@
+services:
+  devenv:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ..:/workspace:cached
+    command: sleep infinity
