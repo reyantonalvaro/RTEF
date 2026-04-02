@@ -106,7 +106,7 @@ build.ninja       Build file (clang + ninja)
 ```bash
 ninja              # Compile (default target)
 ninja run          # Run the Linux demo
-ninja clean        # Remove all build artefacts
+ninja clean        # Remove all build artifacts
 ninja all          # Clean + Compile + Run in one step
 ```
 
