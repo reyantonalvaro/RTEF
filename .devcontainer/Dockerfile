@@ -1,8 +1,9 @@
 FROM alpine:3.17
 
-RUN apk add --no-cache \
+RUN echo "https://dl-cdn.alpinelinux.org/alpine/v3.17/community" >> /etc/apk/repositories && \
+    apk add --no-cache \
     clang \
-    lld \
+    mold \
     ninja \
     musl-dev \
     python3 \

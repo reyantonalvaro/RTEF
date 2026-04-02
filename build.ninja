@@ -1,8 +1,9 @@
 cc = clang
 cflags = -std=c11 -Wall -Wextra -O2
+ldflags = -fuse-ld=mold
 
 rule compile
-  command = $cc $cflags -o $out $in
+  command = $cc $cflags $ldflags -o $out $in
   description = Compiling $in
 
 rule run
