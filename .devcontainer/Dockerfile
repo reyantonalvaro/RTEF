@@ -1,9 +1,9 @@
 FROM alpine:3.17
 
 RUN apk add --no-cache \
-    gcc \
-    g++ \
-    make \
+    clang \
+    lld \
+    ninja \
     musl-dev \
     python3 \
     py3-pip \
