@@ -189,10 +189,15 @@ void OS_TimerDelete(OS_TimerHandle handle)
 }
 
 /* ------------------------------------------------------------------ */
-void OS_TimerDeleteByState(OS_Hsm *hook, OS_StateHandler state)
+void OS_TimerDeleteByState(void)
 {
-    OS_I16 cur;
-    OS_I16 next;
+    OS_Hsm         *hook;
+    OS_StateHandler state;
+    OS_I16          cur;
+    OS_I16          next;
+
+    hook  = OS_HsmGetCurrent();
+    state = hook->State[OS_HsmGetDispatchDepth()];
 
     Port_CriticalEnter();
 
