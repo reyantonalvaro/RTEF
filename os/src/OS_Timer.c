@@ -310,9 +310,9 @@ void OS_SysTick(void)
         OS_InsertEventFromIsr(Pool[idx].Signal, Pool[idx].Hook);
 
         if (Pool[idx].Period > 0U) {
-            /* Periodic: remove, update expiry, re-insert sorted. */
+            /* Periodic: remove, advance expiry, re-insert sorted. */
             ActiveRemove(idx);
-            Pool[idx].Expiry = TickCounter + Pool[idx].Period;
+            Pool[idx].Expiry = Pool[idx].Expiry + Pool[idx].Period;
             ActiveInsert(idx);
         } else {
             TimerFree(idx);
