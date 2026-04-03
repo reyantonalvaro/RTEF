@@ -1,10 +1,14 @@
 /**
  * @file  OS_Timer.c
- * @brief Software-timer pool with O(1) SysTick, watchdog – scalable design.
+ * @brief Software-timer pool with timing-wheel – all O(1) operations.
  *
- * Active timers are kept in a global doubly-linked list sorted by
- * absolute expiry tick.  OS_SysTick() only inspects the head of that
- * list, making its cost independent of the total number of timers.
+ * Active timers live in a hashed timing wheel indexed by
+ * (Expiry & OS_TIMER_WHEEL_MASK).  Every operation is O(1):
+ *   - OS_TimerCreate : hash + insert at slot head.
+ *   - OS_TimerDelete : doubly-linked unlink.
+ *   - OS_SysTick     : inspect one wheel slot per tick.
+ * The sole exception is OS_TimerDeleteByState which walks the
+ * per-HSM list and is O(m) in the number of timers owned by that HSM.
  */
 #include "OS_Timer.h"
 #include "OS_Event.h"
@@ -28,8 +32,8 @@ typedef struct {
     OS_I16          NextFree;     /**< Free-list link (-1 = end).     */
     OS_I16          NextHsm;      /**< Per-HSM list forward link.     */
     OS_I16          PrevHsm;      /**< Per-HSM list backward link.    */
-    OS_I16          NextActive;   /**< Global active-list fwd link.   */
-    OS_I16          PrevActive;   /**< Global active-list bwd link.   */
+    OS_I16          NextWheel;    /**< Wheel-slot list fwd link.      */
+    OS_I16          PrevWheel;    /**< Wheel-slot list bwd link.      */
     bool            Active;       /**< true while timer is running.   */
 } TimerBlock;
 
@@ -39,7 +43,7 @@ typedef struct {
 
 static TimerBlock Pool[OS_MAX_TIMERS];
 static OS_I16     FreeHead;
-static OS_I16     ActiveHead;       /**< Head of expiry-sorted list.  */
+static OS_I16     Wheel[OS_TIMER_WHEEL_SIZE]; /**< Timing-wheel slots. */
 
 /* Watchdog */
 static OS_U32 WdgTimeout;
@@ -62,70 +66,51 @@ static bool TickLeq(OS_U32 a, OS_U32 b)
 }
 
 /**
- * @brief Insert a pool slot into the global active list sorted by Expiry.
- * @param idx  Slot index (must not be in the active list already).
+ * @brief Insert a timer into its timing-wheel slot – O(1).
+ * @param idx  Pool slot index.
  */
-static void ActiveInsert(OS_U16 idx)
+static void WheelInsert(OS_U16 idx)
 {
-    OS_I16 cur;
-    OS_I16 prev;
+    OS_U16 slot = (OS_U16)(Pool[idx].Expiry & (OS_U32)OS_TIMER_WHEEL_MASK);
 
-    if (ActiveHead < 0 || TickLeq(Pool[idx].Expiry,
-                                   Pool[(OS_U16)ActiveHead].Expiry)) {
-        /* Insert at head. */
-        Pool[idx].NextActive = ActiveHead;
-        Pool[idx].PrevActive = -1;
-        if (ActiveHead >= 0) {
-            Pool[(OS_U16)ActiveHead].PrevActive = (OS_I16)idx;
-        }
-        ActiveHead = (OS_I16)idx;
-        return;
+    Pool[idx].PrevWheel = -1;
+    Pool[idx].NextWheel = Wheel[slot];
+    if (Wheel[slot] >= 0) {
+        Pool[(OS_U16)Wheel[slot]].PrevWheel = (OS_I16)idx;
     }
-
-    prev = ActiveHead;
-    cur  = Pool[(OS_U16)ActiveHead].NextActive;
-    while (cur >= 0 && TickLeq(Pool[(OS_U16)cur].Expiry,
-                                Pool[idx].Expiry)) {
-        prev = cur;
-        cur  = Pool[(OS_U16)cur].NextActive;
-    }
-
-    Pool[idx].NextActive          = cur;
-    Pool[idx].PrevActive          = prev;
-    Pool[(OS_U16)prev].NextActive = (OS_I16)idx;
-    if (cur >= 0) {
-        Pool[(OS_U16)cur].PrevActive = (OS_I16)idx;
-    }
+    Wheel[slot] = (OS_I16)idx;
 }
 
 /**
- * @brief Remove a pool slot from the global active list – O(1).
- * @param idx  Slot index (must be in the active list).
+ * @brief Remove a timer from its timing-wheel slot – O(1).
+ * @param idx  Pool slot index.
  */
-static void ActiveRemove(OS_U16 idx)
+static void WheelRemove(OS_U16 idx)
 {
-    if (Pool[idx].PrevActive >= 0) {
-        Pool[(OS_U16)Pool[idx].PrevActive].NextActive = Pool[idx].NextActive;
+    OS_U16 slot = (OS_U16)(Pool[idx].Expiry & (OS_U32)OS_TIMER_WHEEL_MASK);
+
+    if (Pool[idx].PrevWheel >= 0) {
+        Pool[(OS_U16)Pool[idx].PrevWheel].NextWheel = Pool[idx].NextWheel;
     } else {
-        ActiveHead = Pool[idx].NextActive;
+        Wheel[slot] = Pool[idx].NextWheel;
     }
-    if (Pool[idx].NextActive >= 0) {
-        Pool[(OS_U16)Pool[idx].NextActive].PrevActive = Pool[idx].PrevActive;
+    if (Pool[idx].NextWheel >= 0) {
+        Pool[(OS_U16)Pool[idx].NextWheel].PrevWheel = Pool[idx].PrevWheel;
     }
-    Pool[idx].NextActive = -1;
-    Pool[idx].PrevActive = -1;
+    Pool[idx].NextWheel = -1;
+    Pool[idx].PrevWheel = -1;
 }
 
 /**
- * @brief Return a pool slot to the free list.
+ * @brief Return a pool slot to the free list – O(1).
  * @param idx  Slot index.
  */
 static void TimerFree(OS_U16 idx)
 {
-    /* Unlink from global sorted active list – O(1). */
-    ActiveRemove(idx);
+    /* Unlink from timing-wheel slot – O(1). */
+    WheelRemove(idx);
 
-    /* Unlink from per-HSM doubly-linked list. */
+    /* Unlink from per-HSM doubly-linked list – O(1). */
     if (Pool[idx].PrevHsm >= 0) {
         Pool[(OS_U16)Pool[idx].PrevHsm].NextHsm = Pool[idx].NextHsm;
     } else {
@@ -135,11 +120,11 @@ static void TimerFree(OS_U16 idx)
         Pool[(OS_U16)Pool[idx].NextHsm].PrevHsm = Pool[idx].PrevHsm;
     }
 
-    Pool[idx].Active     = false;
-    Pool[idx].NextHsm    = -1;
-    Pool[idx].PrevHsm    = -1;
-    Pool[idx].NextActive = -1;
-    Pool[idx].PrevActive = -1;
+    Pool[idx].Active    = false;
+    Pool[idx].NextHsm   = -1;
+    Pool[idx].PrevHsm   = -1;
+    Pool[idx].NextWheel  = -1;
+    Pool[idx].PrevWheel  = -1;
     Pool[idx].NextFree   = FreeHead;
     FreeHead             = (OS_I16)idx;
 }
@@ -176,13 +161,16 @@ void OS_TimerInit(void)
         Pool[i].NextFree   = (OS_I16)(i + 1);
         Pool[i].NextHsm    = -1;
         Pool[i].PrevHsm    = -1;
-        Pool[i].NextActive = -1;
-        Pool[i].PrevActive = -1;
+        Pool[i].NextWheel  = -1;
+        Pool[i].PrevWheel  = -1;
     }
     Pool[OS_MAX_TIMERS - 1U].NextFree = -1;
 
+    for (i = 0U; i < (OS_U16)OS_TIMER_WHEEL_SIZE; i++) {
+        Wheel[i] = -1;
+    }
+
     FreeHead    = 0;
-    ActiveHead  = -1;
     TickCounter = 0U;
     WdgEnabled  = false;
 }
@@ -234,8 +222,8 @@ OS_TimerHandle OS_TimerCreate(OS_Signal signal,
     }
     me->TimerHead = (OS_I16)idx;
 
-    /* Insert into global sorted active list by Expiry. */
-    ActiveInsert(idx);
+    /* Insert into timing-wheel slot – O(1). */
+    WheelInsert(idx);
 
     handle.Index      = idx;
     handle.Generation = Pool[idx].Generation;
@@ -297,26 +285,37 @@ void OS_TimerDeleteByState(void)
 /* ------------------------------------------------------------------ */
 void OS_SysTick(void)
 {
+    OS_I16 cur;
+    OS_I16 next;
+    OS_U16 slot;
+
     Port_CriticalEnter();
 
     TickCounter++;
 
-    /* Process only the head(s) whose Expiry has been reached – O(1) amortised. */
-    while (ActiveHead >= 0
-           && TickLeq(Pool[(OS_U16)ActiveHead].Expiry, TickCounter)) {
+    /* Inspect the single wheel slot for this tick – O(1). */
+    slot = (OS_U16)(TickCounter & (OS_U32)OS_TIMER_WHEEL_MASK);
+    cur  = Wheel[slot];
 
-        OS_U16 idx = (OS_U16)ActiveHead;
+    while (cur >= 0) {
+        next = Pool[(OS_U16)cur].NextWheel;
 
-        OS_InsertEventFromIsr(Pool[idx].Signal, Pool[idx].Hook);
+        if (TickLeq(Pool[(OS_U16)cur].Expiry, TickCounter)) {
+            OS_InsertEventFromIsr(Pool[(OS_U16)cur].Signal,
+                                  Pool[(OS_U16)cur].Hook);
 
-        if (Pool[idx].Period > 0U) {
-            /* Periodic: remove, advance expiry, re-insert sorted. */
-            ActiveRemove(idx);
-            Pool[idx].Expiry = Pool[idx].Expiry + Pool[idx].Period;
-            ActiveInsert(idx);
-        } else {
-            TimerFree(idx);
+            if (Pool[(OS_U16)cur].Period > 0U) {
+                /* Periodic: move to the new wheel slot – O(1). */
+                WheelRemove((OS_U16)cur);
+                Pool[(OS_U16)cur].Expiry =
+                    Pool[(OS_U16)cur].Expiry + Pool[(OS_U16)cur].Period;
+                WheelInsert((OS_U16)cur);
+            } else {
+                TimerFree((OS_U16)cur);
+            }
         }
+
+        cur = next;
     }
 
     WatchdogTick();
