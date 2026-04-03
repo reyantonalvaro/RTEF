@@ -1,6 +1,10 @@
 /**
  * @file  OS_Timer.c
- * @brief Software-timer pool, SysTick handler and watchdog – all O(1).
+ * @brief Software-timer pool with O(1) SysTick, watchdog – scalable design.
+ *
+ * Active timers are kept in a global doubly-linked list sorted by
+ * absolute expiry tick.  OS_SysTick() only inspects the head of that
+ * list, making its cost independent of the total number of timers.
  */
 #include "OS_Timer.h"
 #include "OS_Event.h"
@@ -15,7 +19,7 @@
 
 /** @brief Internal representation of a single software timer. */
 typedef struct {
-    OS_U32          Remaining;    /**< Ticks until next expiry.       */
+    OS_U32          Expiry;       /**< Absolute tick of next expiry.  */
     OS_U32          Period;       /**< Reload value (0 = one-shot).   */
     OS_Signal       Signal;       /**< Signal posted on expiry.       */
     OS_Hsm         *Hook;         /**< Owning HSM.                    */
@@ -24,6 +28,8 @@ typedef struct {
     OS_I16          NextFree;     /**< Free-list link (-1 = end).     */
     OS_I16          NextHsm;      /**< Per-HSM list forward link.     */
     OS_I16          PrevHsm;      /**< Per-HSM list backward link.    */
+    OS_I16          NextActive;   /**< Global active-list fwd link.   */
+    OS_I16          PrevActive;   /**< Global active-list bwd link.   */
     bool            Active;       /**< true while timer is running.   */
 } TimerBlock;
 
@@ -33,6 +39,7 @@ typedef struct {
 
 static TimerBlock Pool[OS_MAX_TIMERS];
 static OS_I16     FreeHead;
+static OS_I16     ActiveHead;       /**< Head of expiry-sorted list.  */
 
 /* Watchdog */
 static OS_U32 WdgTimeout;
@@ -47,11 +54,77 @@ static volatile OS_U32 TickCounter;
 /* ------------------------------------------------------------------ */
 
 /**
+ * @brief True when absolute tick @p a is at or before @p b (handles wrap).
+ */
+static bool TickLeq(OS_U32 a, OS_U32 b)
+{
+    return (OS_I32)(a - b) <= 0;
+}
+
+/**
+ * @brief Insert a pool slot into the global active list sorted by Expiry.
+ * @param idx  Slot index (must not be in the active list already).
+ */
+static void ActiveInsert(OS_U16 idx)
+{
+    OS_I16 cur;
+    OS_I16 prev;
+
+    if (ActiveHead < 0 || TickLeq(Pool[idx].Expiry,
+                                   Pool[(OS_U16)ActiveHead].Expiry)) {
+        /* Insert at head. */
+        Pool[idx].NextActive = ActiveHead;
+        Pool[idx].PrevActive = -1;
+        if (ActiveHead >= 0) {
+            Pool[(OS_U16)ActiveHead].PrevActive = (OS_I16)idx;
+        }
+        ActiveHead = (OS_I16)idx;
+        return;
+    }
+
+    prev = ActiveHead;
+    cur  = Pool[(OS_U16)ActiveHead].NextActive;
+    while (cur >= 0 && TickLeq(Pool[(OS_U16)cur].Expiry,
+                                Pool[idx].Expiry)) {
+        prev = cur;
+        cur  = Pool[(OS_U16)cur].NextActive;
+    }
+
+    Pool[idx].NextActive          = cur;
+    Pool[idx].PrevActive          = prev;
+    Pool[(OS_U16)prev].NextActive = (OS_I16)idx;
+    if (cur >= 0) {
+        Pool[(OS_U16)cur].PrevActive = (OS_I16)idx;
+    }
+}
+
+/**
+ * @brief Remove a pool slot from the global active list – O(1).
+ * @param idx  Slot index (must be in the active list).
+ */
+static void ActiveRemove(OS_U16 idx)
+{
+    if (Pool[idx].PrevActive >= 0) {
+        Pool[(OS_U16)Pool[idx].PrevActive].NextActive = Pool[idx].NextActive;
+    } else {
+        ActiveHead = Pool[idx].NextActive;
+    }
+    if (Pool[idx].NextActive >= 0) {
+        Pool[(OS_U16)Pool[idx].NextActive].PrevActive = Pool[idx].PrevActive;
+    }
+    Pool[idx].NextActive = -1;
+    Pool[idx].PrevActive = -1;
+}
+
+/**
  * @brief Return a pool slot to the free list.
  * @param idx  Slot index.
  */
 static void TimerFree(OS_U16 idx)
 {
+    /* Unlink from global sorted active list – O(1). */
+    ActiveRemove(idx);
+
     /* Unlink from per-HSM doubly-linked list. */
     if (Pool[idx].PrevHsm >= 0) {
         Pool[(OS_U16)Pool[idx].PrevHsm].NextHsm = Pool[idx].NextHsm;
@@ -62,11 +135,13 @@ static void TimerFree(OS_U16 idx)
         Pool[(OS_U16)Pool[idx].NextHsm].PrevHsm = Pool[idx].PrevHsm;
     }
 
-    Pool[idx].Active   = false;
-    Pool[idx].NextHsm  = -1;
-    Pool[idx].PrevHsm  = -1;
-    Pool[idx].NextFree = FreeHead;
-    FreeHead           = (OS_I16)idx;
+    Pool[idx].Active     = false;
+    Pool[idx].NextHsm    = -1;
+    Pool[idx].PrevHsm    = -1;
+    Pool[idx].NextActive = -1;
+    Pool[idx].PrevActive = -1;
+    Pool[idx].NextFree   = FreeHead;
+    FreeHead             = (OS_I16)idx;
 }
 
 /**
@@ -101,10 +176,13 @@ void OS_TimerInit(void)
         Pool[i].NextFree   = (OS_I16)(i + 1);
         Pool[i].NextHsm    = -1;
         Pool[i].PrevHsm    = -1;
+        Pool[i].NextActive = -1;
+        Pool[i].PrevActive = -1;
     }
     Pool[OS_MAX_TIMERS - 1U].NextFree = -1;
 
     FreeHead    = 0;
+    ActiveHead  = -1;
     TickCounter = 0U;
     WdgEnabled  = false;
 }
@@ -140,7 +218,7 @@ OS_TimerHandle OS_TimerCreate(OS_Signal signal,
     idx      = (OS_U16)FreeHead;
     FreeHead = Pool[idx].NextFree;
 
-    Pool[idx].Remaining  = periodMs;
+    Pool[idx].Expiry     = TickCounter + periodMs;
     Pool[idx].Period     = periodic ? periodMs : 0U;
     Pool[idx].Signal     = signal;
     Pool[idx].Hook       = me;
@@ -155,6 +233,9 @@ OS_TimerHandle OS_TimerCreate(OS_Signal signal,
         Pool[(OS_U16)me->TimerHead].PrevHsm = (OS_I16)idx;
     }
     me->TimerHead = (OS_I16)idx;
+
+    /* Insert into global sorted active list by Expiry. */
+    ActiveInsert(idx);
 
     handle.Index      = idx;
     handle.Generation = Pool[idx].Generation;
@@ -216,26 +297,25 @@ void OS_TimerDeleteByState(void)
 /* ------------------------------------------------------------------ */
 void OS_SysTick(void)
 {
-    OS_U16 i;
-
     Port_CriticalEnter();
 
     TickCounter++;
 
-    for (i = 0U; i < (OS_U16)OS_MAX_TIMERS; i++) {
-        if (Pool[i].Active) {
-            if (Pool[i].Remaining > 0U) {
-                Pool[i].Remaining--;
-            }
-            if (Pool[i].Remaining == 0U) {
-                OS_InsertEventFromIsr(Pool[i].Signal, Pool[i].Hook);
+    /* Process only the head(s) whose Expiry has been reached – O(1) amortised. */
+    while (ActiveHead >= 0
+           && TickLeq(Pool[(OS_U16)ActiveHead].Expiry, TickCounter)) {
 
-                if (Pool[i].Period > 0U) {
-                    Pool[i].Remaining = Pool[i].Period;
-                } else {
-                    TimerFree(i);
-                }
-            }
+        OS_U16 idx = (OS_U16)ActiveHead;
+
+        OS_InsertEventFromIsr(Pool[idx].Signal, Pool[idx].Hook);
+
+        if (Pool[idx].Period > 0U) {
+            /* Periodic: remove, update expiry, re-insert sorted. */
+            ActiveRemove(idx);
+            Pool[idx].Expiry = TickCounter + Pool[idx].Period;
+            ActiveInsert(idx);
+        } else {
+            TimerFree(idx);
         }
     }
 
