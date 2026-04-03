@@ -42,7 +42,9 @@ void Port_ErrorLog(OS_U32 id, char const *desc,
 void Port_SystemHalt(void);
 
 /**
- * @brief Start the 1 ms periodic system-tick source.
+ * @brief Start the periodic system-tick source.
+ *
+ * The tick period is defined by OS_TICK_PERIOD_MS (see OS_Config.h).
  */
 void Port_SysTickStart(void);
 
@@ -53,9 +55,9 @@ void Port_SysTickStop(void);
 
 /**
  * @brief Initialise the hardware watchdog.
- * @param timeoutMs Timeout in milliseconds.
+ * @param timeoutTicks Timeout in OS ticks (see OS_TICK_PERIOD_MS).
  */
-void Port_WatchdogInit(OS_U32 timeoutMs);
+void Port_WatchdogInit(OS_U32 timeoutTicks);
 
 /**
  * @brief Feed / kick the hardware watchdog.
