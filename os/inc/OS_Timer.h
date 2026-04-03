@@ -32,17 +32,18 @@ void OS_TimerInit(void);
 /**
  * @brief Create a new software timer.
  *
- * When the timer expires it posts @p signal to the event queue of
- * the HSM pointed to by @p me.  Duplicate timers (same hook + same
- * signal already active) trigger Q_ASSERT.
+ * The owning HSM is obtained internally via OS_HsmGetCurrent(),
+ * so this function must be called during event dispatch (e.g. from
+ * a Q_ENTRY handler).  When the timer expires it posts @p signal
+ * to the event queue of that HSM.  Duplicate timers (same hook +
+ * same signal already active) trigger Q_ASSERT.
  *
- * @param me        Owning HSM instance.
  * @param signal    Signal to post on expiry.
  * @param periodMs  Timeout / period in milliseconds (> 0).
  * @param periodic  true = auto-reload, false = one-shot.
  * @return          Handle for later manual deletion.
  */
-OS_TimerHandle OS_TimerCreate(OS_Hsm *me, OS_Signal signal,
+OS_TimerHandle OS_TimerCreate(OS_Signal signal,
                               OS_U32 periodMs, bool periodic);
 
 /**

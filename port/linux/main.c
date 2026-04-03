@@ -86,7 +86,7 @@ static OS_Status StateRed(OS_Hsm *const me, OS_Event const *const e)
     switch (e->Signal) {
         case Q_ENTRY:
             (void)printf("[HSM] ENTRY  Red    \xF0\x9F\x94\xB4\n");
-            (void)OS_TimerCreate(me, (OS_Signal)SIG_TIMEOUT, 500U, false);
+            (void)OS_TimerCreate((OS_Signal)SIG_TIMEOUT, 500U, false);
             break;
         case Q_EXIT:
             (void)printf("[HSM] EXIT   Red\n");
@@ -112,7 +112,7 @@ static OS_Status StateGreen(OS_Hsm *const me, OS_Event const *const e)
     switch (e->Signal) {
         case Q_ENTRY:
             (void)printf("[HSM] ENTRY  Green  \xF0\x9F\x9F\xA2\n");
-            (void)OS_TimerCreate(me, (OS_Signal)SIG_TIMEOUT, 500U, false);
+            (void)OS_TimerCreate((OS_Signal)SIG_TIMEOUT, 500U, false);
             break;
         case Q_EXIT:
             (void)printf("[HSM] EXIT   Green\n");
@@ -138,7 +138,7 @@ static OS_Status StateYellow(OS_Hsm *const me, OS_Event const *const e)
     switch (e->Signal) {
         case Q_ENTRY:
             (void)printf("[HSM] ENTRY  Yellow \xF0\x9F\x9F\xA1\n");
-            (void)OS_TimerCreate(me, (OS_Signal)SIG_TIMEOUT, 200U, false);
+            (void)OS_TimerCreate((OS_Signal)SIG_TIMEOUT, 200U, false);
             break;
         case Q_EXIT:
             (void)printf("[HSM] EXIT   Yellow\n");

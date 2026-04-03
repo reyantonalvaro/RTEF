@@ -110,12 +110,15 @@ void OS_TimerInit(void)
 }
 
 /* ------------------------------------------------------------------ */
-OS_TimerHandle OS_TimerCreate(OS_Hsm *me, OS_Signal signal,
+OS_TimerHandle OS_TimerCreate(OS_Signal signal,
                               OS_U32 periodMs, bool periodic)
 {
     OS_TimerHandle handle;
     OS_U16         idx;
+    OS_Hsm        *me;
 
+    Q_ASSERT(OS_HsmInDispatch());
+    me = OS_HsmGetCurrent();
     Q_ASSERT(me != (OS_Hsm *)0);
     Q_ASSERT(me->Initialized);
     Q_ASSERT(periodMs > 0U);
