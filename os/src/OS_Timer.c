@@ -116,7 +116,25 @@ static void WheelInsert(OS_U16 idx)
     OS_U32 delta;
     OS_U16 slot;
 
-    /* Unsigned delta: always >= 0 because Expiry is in the future. */
+    /*
+     * Round formula explained:
+     *   The wheel slot is visited every OS_TIMER_WHEEL_SIZE ticks.
+     *   We want the timer to fire on the visit where TickCounter == Expiry
+     *   (modulo WHEEL_SIZE).  Round counts how many full rotations must
+     *   pass BEFORE the firing visit.
+     *
+     *   Let delta = Expiry - TickCounter (unsigned, always >= 1 because
+     *   Expiry = TickCounter + periodTicks and periodTicks >= 1).
+     *
+     *   The slot is first visited (delta - 1) ticks later or less, so:
+     *     Round = (delta - 1) / WHEEL_SIZE
+     *   Using bit-shift: Round = (delta - 1U) >> OS_TIMER_WHEEL_BITS.
+     *
+     *   Verification with WHEEL_SIZE = 16:
+     *     delta = 1  → Round = 0, fires next slot visit (1 tick away). ✓
+     *     delta = 16 → Round = 0, fires at exactly the next slot visit. ✓
+     *     delta = 17 → Round = 1, fires one rotation later.            ✓
+     */
     delta = Pool[idx].Expiry - TickCounter - 1U;
     Pool[idx].Round = delta >> (OS_U32)OS_TIMER_WHEEL_BITS;
 
@@ -301,7 +319,7 @@ bool OS_TimerDelete(OS_TimerHandle handle)
     bool        deleted = false;
 
     if (handle.Index >= (OS_U16)OS_TIMER_WHEEL_SIZE) {
-        return false;   /* Index out of range — stale handle. */
+        return false;   /* Index out of pool bounds — reject regardless of generation. */
     }
 
     Port_CriticalEnter();

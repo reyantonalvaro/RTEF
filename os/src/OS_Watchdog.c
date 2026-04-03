@@ -53,9 +53,14 @@ void OS_WatchdogTick(void)
         return;
     }
 
-    if (WdgCounter > 1U) {
-        WdgCounter--;
-    } else {
+    /*
+     * Decrement then check.  The minimum timeout is OS_WATCHDOG_MIN_TICKS
+     * (>= 2), so WdgCounter is >= 2 when enabled.  After exactly
+     * timeoutTicks calls without OS_WatchdogFeed(), WdgCounter reaches 0
+     * and the system halts.
+     */
+    WdgCounter--;
+    if (WdgCounter == 0U) {
         Q_ASSERT_ID(99U, false);   /* Software watchdog expired */
     }
 }
