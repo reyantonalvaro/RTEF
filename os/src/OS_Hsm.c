@@ -53,6 +53,7 @@ void OS_HsmInit(OS_Hsm *me, OS_StateHandler topState)
 
     me->Depth       = 0U;
     me->Initialized = true;
+    me->TimerHead   = -1;
     me->State[0]    = topState;
 
     for (i = 1U; i < (OS_U8)OS_HSM_MAX_DEPTH; i++) {
