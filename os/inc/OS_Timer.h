@@ -56,14 +56,13 @@ OS_TimerHandle OS_TimerCreate(OS_Signal signal,
 void OS_TimerDelete(OS_TimerHandle handle);
 
 /**
- * @brief Delete every timer owned by a specific state (OS-internal).
+ * @brief Delete every timer owned by the current state (OS-internal).
  *
  * Called automatically by the HSM engine during state transitions.
- *
- * @param hook   HSM instance.
- * @param state  State handler whose timers are to be removed.
+ * The owning HSM and state are obtained internally via
+ * OS_HsmGetCurrent() and OS_HsmGetDispatchDepth().
  */
-void OS_TimerDeleteByState(OS_Hsm *hook, OS_StateHandler state);
+void OS_TimerDeleteByState(void);
 
 /**
  * @brief 1 ms system-tick handler.  Call from the HW timer ISR.

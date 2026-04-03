@@ -98,15 +98,17 @@ void OS_HsmTransition(OS_Hsm *me, OS_StateHandler target)
 
     /* Exit every descendant, bottom-up. */
     while (me->Depth > transDepth) {
+        CurrentDispatchDepth = me->Depth;
         DispatchDirect(me, me->Depth, (OS_Signal)Q_EXIT);
-        OS_TimerDeleteByState(me, me->State[me->Depth]);
+        OS_TimerDeleteByState();
         me->State[me->Depth] = (OS_StateHandler)0;
         me->Depth--;
     }
 
     /* Exit the current state at transDepth. */
+    CurrentDispatchDepth = transDepth;
     DispatchDirect(me, transDepth, (OS_Signal)Q_EXIT);
-    OS_TimerDeleteByState(me, me->State[transDepth]);
+    OS_TimerDeleteByState();
 
     /* Install and enter the target state. */
     me->State[transDepth] = target;
