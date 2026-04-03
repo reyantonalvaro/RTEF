@@ -55,9 +55,9 @@ void OS_WatchdogTick(void)
 
     /*
      * Decrement then check.  The minimum timeout is OS_WATCHDOG_MIN_TICKS
-     * (>= 2), so WdgCounter is >= 2 when enabled.  After exactly
-     * timeoutTicks calls without OS_WatchdogFeed(), WdgCounter reaches 0
-     * and the system halts.
+     * (>= 2), so WdgCounter starts at timeoutTicks (>= 2) when enabled.
+     * After exactly timeoutTicks calls without OS_WatchdogFeed(),
+     * WdgCounter reaches 0 and the system halts.
      */
     WdgCounter--;
     if (WdgCounter == 0U) {

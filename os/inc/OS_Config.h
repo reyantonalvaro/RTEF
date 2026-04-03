@@ -82,6 +82,9 @@
  * Example: OS_TICK_PERIOD_MS = 1   →  1 tick = 1 ms
  *          OS_TICK_PERIOD_MS = 10  →  1 tick = 10 ms
  *          OS_TICK_PERIOD_MS = 1000 → 1 tick = 1 s  (enables 20+ year timers)
+ *
+ * @note Changing this value requires matching hardware timer
+ *       reconfiguration in the port layer (Port_SysTickStart).
  */
 #define OS_TICK_PERIOD_MS    1U
 

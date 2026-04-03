@@ -76,7 +76,8 @@ _Static_assert(OS_TIMER_MAX_PER_HSM <= 255U,
 typedef struct {
     OS_U32          Expiry;       /**< Absolute tick of next expiry.  */
     OS_U32          Period;       /**< Reload value (0 = one-shot).   */
-    OS_U32          Round;        /**< Full wheel rotations remaining. */
+    OS_U32          Round;        /**< Full wheel rotations before firing;
+                                       computed on insert/reschedule.   */
     OS_Signal       Signal;       /**< Signal posted on expiry.       */
     OS_Hsm         *Hook;         /**< Owning HSM.                    */
     OS_StateHandler OwnerState;   /**< State that created this timer. */
@@ -126,7 +127,8 @@ static void WheelInsert(OS_U16 idx)
      *   pass BEFORE the firing visit.
      *
      *   Let delta = Expiry - TickCounter (unsigned, always >= 1 because
-     *   Expiry = TickCounter + periodTicks and periodTicks >= 1).
+     *   Expiry = TickCounter + periodTicks and periodTicks >= 1, which
+     *   is guaranteed by the assertion in OS_TimerCreate).
      *
      *   The slot is first visited (delta - 1) ticks later or less, so:
      *     Round = (delta - 1) / WHEEL_SIZE
