@@ -2,20 +2,69 @@
  * @file  OS_Timer.c
  * @brief Software-timer pool with timing-wheel – all O(1) operations.
  *
+ * @par Architecture
+ *
  * Active timers live in a hashed timing wheel indexed by
- * (Expiry & OS_TIMER_WHEEL_MASK).  Every operation is O(1):
- *   - OS_TimerCreate : hash + insert at slot head.
- *   - OS_TimerDelete : doubly-linked unlink.
- *   - OS_SysTick     : inspect one wheel slot per tick.
- * The sole exception is OS_TimerDeleteByState which walks the
- * per-HSM list and is O(m) in the number of timers owned by that HSM.
+ * (Expiry & OS_TIMER_WHEEL_MASK).  Each timer also carries a Round
+ * counter: the number of full wheel rotations remaining before the
+ * timer fires.  OS_SysTick inspects exactly one wheel slot per tick —
+ * O(1) per tick (bounded by OS_TIMER_WHEEL_SIZE = pool size).
+ *
+ * Operations:
+ *   - OS_TimerCreate      : O(1) alloc + wheel insert.
+ *   - OS_TimerDelete      : O(1) doubly-linked unlink.
+ *   - OS_SysTick          : O(1) — one slot per tick, at most
+ *                           OS_TIMER_WHEEL_SIZE timers per slot.
+ *   - OS_TimerDeleteByState: O(m) in timers owned by that state,
+ *                            bounded by OS_TIMER_MAX_PER_HSM.
+ *                            Called only during transitions, never
+ *                            from the tick ISR.  Intentional.
+ *
+ * @par Long-period timers (fix 1.1)
+ * The Round counter replaces the old TickLeq signed-comparison trick.
+ * Unsigned arithmetic is used throughout; no signed overflow.
+ * Formula: Round = (Expiry - TickCounter - 1) >> OS_TIMER_WHEEL_BITS
+ * This correctly handles periods up to 2^32 - 1 ticks.
+ * For periods beyond 49 days at 1 ms/tick, increase OS_TICK_PERIOD_MS.
+ *
+ * @par Tick ISR design (fix 1.2)
+ * OS_SysTick only inserts events into the queue (OS_InsertEventFromIsr).
+ * It never dispatches.  Event dispatch runs in OS_EventDispatch() at
+ * lower priority (the "OS IRQ" above the main while(1) loop).
+ * This guarantees the tick ISR completes in bounded time.
+ *
+ * @par Per-HSM quota (fix 3.6)
+ * Each HSM is limited to OS_TIMER_MAX_PER_HSM simultaneous timers,
+ * preventing a single HSM from exhausting the shared pool.
+ *
+ * @par Generation counter (fix 2.7)
+ * Active timers always have Generation >= 1.  Generation 0 is never
+ * assigned to an active timer, so OS_TIMER_INVALID {0xFFFF, 0} is safe.
+ * On U16 wrap-around the counter skips 0 and resumes at 1.
  */
 #include "OS_Timer.h"
+#include "OS_Timer_Private.h"
+#include "OS_Watchdog_Private.h"
 #include "OS_Event.h"
 #include "OS_Error.h"
 #include "OS_Hsm.h"
 #include "OS_Config.h"
 #include "OS_Port.h"
+
+/* ------------------------------------------------------------------ */
+/*  Compile-time invariant checks                                     */
+/* ------------------------------------------------------------------ */
+
+_Static_assert((OS_TIMER_WHEEL_SIZE & (OS_TIMER_WHEEL_SIZE - 1U)) == 0U,
+               "OS_TIMER_WHEEL_SIZE must be a power of two");
+_Static_assert(OS_TIMER_WHEEL_SIZE >= 2U,
+               "OS_TIMER_WHEEL_SIZE must be at least 2");
+_Static_assert(OS_TIMER_WHEEL_SIZE <= 32767U,
+               "OS_TIMER_WHEEL_SIZE must fit in OS_I16 (max 32767)");
+_Static_assert(OS_TIMER_MAX_PER_HSM <= OS_TIMER_WHEEL_SIZE,
+               "OS_TIMER_MAX_PER_HSM cannot exceed OS_TIMER_WHEEL_SIZE");
+_Static_assert(OS_TIMER_MAX_PER_HSM >= 1U,
+               "OS_TIMER_MAX_PER_HSM must be at least 1");
 
 /* ------------------------------------------------------------------ */
 /*  Timer block                                                       */
@@ -25,10 +74,11 @@
 typedef struct {
     OS_U32          Expiry;       /**< Absolute tick of next expiry.  */
     OS_U32          Period;       /**< Reload value (0 = one-shot).   */
+    OS_U32          Round;        /**< Full wheel rotations remaining. */
     OS_Signal       Signal;       /**< Signal posted on expiry.       */
     OS_Hsm         *Hook;         /**< Owning HSM.                    */
     OS_StateHandler OwnerState;   /**< State that created this timer. */
-    OS_U16          Generation;   /**< Stale-handle detection.        */
+    OS_U16          Generation;   /**< Stale-handle detection (>= 1). */
     OS_I16          NextFree;     /**< Free-list link (-1 = end).     */
     OS_I16          NextHsm;      /**< Per-HSM list forward link.     */
     OS_I16          PrevHsm;      /**< Per-HSM list backward link.    */
@@ -41,14 +91,9 @@ typedef struct {
 /*  Module-private state                                              */
 /* ------------------------------------------------------------------ */
 
-static TimerBlock Pool[OS_MAX_TIMERS];
+static TimerBlock Pool[OS_TIMER_WHEEL_SIZE];
 static OS_I16     FreeHead;
 static OS_I16     Wheel[OS_TIMER_WHEEL_SIZE]; /**< Timing-wheel slots. */
-
-/* Watchdog */
-static OS_U32 WdgTimeout;
-static OS_U32 WdgCounter;
-static bool   WdgEnabled;
 
 /* Tick counter */
 static volatile OS_U32 TickCounter;
@@ -58,20 +103,24 @@ static volatile OS_U32 TickCounter;
 /* ------------------------------------------------------------------ */
 
 /**
- * @brief True when absolute tick @p a is at or before @p b (handles wrap).
- */
-static bool TickLeq(OS_U32 a, OS_U32 b)
-{
-    return (OS_I32)(a - b) <= 0;
-}
-
-/**
  * @brief Insert a timer into its timing-wheel slot – O(1).
+ *
+ * Computes the Round counter using unsigned arithmetic so that
+ * arbitrarily large periods (up to 2^32 - 1 ticks) work correctly.
+ * Formula: Round = (Expiry - TickCounter - 1) >> OS_TIMER_WHEEL_BITS
+ *
  * @param idx  Pool slot index.
  */
 static void WheelInsert(OS_U16 idx)
 {
-    OS_U16 slot = (OS_U16)(Pool[idx].Expiry & (OS_U32)OS_TIMER_WHEEL_MASK);
+    OS_U32 delta;
+    OS_U16 slot;
+
+    /* Unsigned delta: always >= 0 because Expiry is in the future. */
+    delta = Pool[idx].Expiry - TickCounter - 1U;
+    Pool[idx].Round = delta >> (OS_U32)OS_TIMER_WHEEL_BITS;
+
+    slot = (OS_U16)(Pool[idx].Expiry & (OS_U32)OS_TIMER_WHEEL_MASK);
 
     Pool[idx].PrevWheel = -1;
     Pool[idx].NextWheel = Wheel[slot];
@@ -120,31 +169,23 @@ static void TimerFree(OS_U16 idx)
         Pool[(OS_U16)Pool[idx].NextHsm].PrevHsm = Pool[idx].PrevHsm;
     }
 
-    Pool[idx].Active    = false;
-    Pool[idx].NextHsm   = -1;
-    Pool[idx].PrevHsm   = -1;
-    Pool[idx].NextWheel  = -1;
-    Pool[idx].PrevWheel  = -1;
-    Pool[idx].NextFree   = FreeHead;
-    FreeHead             = (OS_I16)idx;
-}
+    /* Update per-HSM timer count. */
+    Pool[idx].Hook->TimerCount--;
 
-/**
- * @brief Advance the software watchdog by one tick.
- */
-static void WatchdogTick(void)
-{
-    if (!WdgEnabled) {
-        return;
-    }
-
-    if (WdgCounter > 0U) {
-        WdgCounter--;
-    }
-
-    if (WdgCounter == 0U) {
-        Q_ASSERT_ID(99U, false);   /* Software watchdog expired */
-    }
+    /* Clear all fields to prevent stale-data access. */
+    Pool[idx].Active      = false;
+    Pool[idx].Hook        = (OS_Hsm *)0;
+    Pool[idx].OwnerState  = (OS_StateHandler)0;
+    Pool[idx].Expiry      = 0U;
+    Pool[idx].Period      = 0U;
+    Pool[idx].Round       = 0U;
+    Pool[idx].Signal      = (OS_Signal)Q_EMPTY;
+    Pool[idx].NextHsm     = -1;
+    Pool[idx].PrevHsm     = -1;
+    Pool[idx].NextWheel   = -1;
+    Pool[idx].PrevWheel   = -1;
+    Pool[idx].NextFree    = FreeHead;
+    FreeHead              = (OS_I16)idx;
 }
 
 /* ------------------------------------------------------------------ */
@@ -155,16 +196,22 @@ void OS_TimerInit(void)
 {
     OS_U16 i;
 
-    for (i = 0U; i < (OS_U16)OS_MAX_TIMERS; i++) {
-        Pool[i].Active     = false;
-        Pool[i].Generation = 0U;
-        Pool[i].NextFree   = (OS_I16)(i + 1);
-        Pool[i].NextHsm    = -1;
-        Pool[i].PrevHsm    = -1;
-        Pool[i].NextWheel  = -1;
-        Pool[i].PrevWheel  = -1;
+    for (i = 0U; i < (OS_U16)OS_TIMER_WHEEL_SIZE; i++) {
+        Pool[i].Active      = false;
+        Pool[i].Generation  = 0U;
+        Pool[i].NextFree    = (OS_I16)(i + 1U);
+        Pool[i].NextHsm     = -1;
+        Pool[i].PrevHsm     = -1;
+        Pool[i].NextWheel   = -1;
+        Pool[i].PrevWheel   = -1;
+        Pool[i].Hook        = (OS_Hsm *)0;
+        Pool[i].OwnerState  = (OS_StateHandler)0;
+        Pool[i].Expiry      = 0U;
+        Pool[i].Period      = 0U;
+        Pool[i].Round       = 0U;
+        Pool[i].Signal      = (OS_Signal)Q_EMPTY;
     }
-    Pool[OS_MAX_TIMERS - 1U].NextFree = -1;
+    Pool[OS_TIMER_WHEEL_SIZE - 1U].NextFree = -1;
 
     for (i = 0U; i < (OS_U16)OS_TIMER_WHEEL_SIZE; i++) {
         Wheel[i] = -1;
@@ -172,26 +219,33 @@ void OS_TimerInit(void)
 
     FreeHead    = 0;
     TickCounter = 0U;
-    WdgEnabled  = false;
 }
 
 /* ------------------------------------------------------------------ */
 OS_TimerHandle OS_TimerCreate(OS_Signal signal,
-                              OS_U32 periodMs, bool periodic)
+                              OS_U32 periodTicks, bool periodic)
 {
     OS_TimerHandle handle;
     OS_U16         idx;
     OS_Hsm        *me;
+    OS_U16         newGen;
 
     Q_ASSERT(OS_HsmInDispatch());
     me = OS_HsmGetCurrent();
     Q_ASSERT(me != (OS_Hsm *)0);
     Q_ASSERT(me->Initialized);
-    Q_ASSERT(periodMs > 0U);
+    Q_ASSERT(periodTicks > 0U);
 
     Port_CriticalEnter();
 
-    /* Reject duplicate: walk only this HSM's active-timer list. */
+    /* Per-HSM quota check – O(1). */
+    Q_ASSERT(me->TimerCount < (OS_U8)OS_TIMER_MAX_PER_HSM);
+
+    /*
+     * Duplicate-signal check: walk this HSM's timer list.
+     * Bounded by OS_TIMER_MAX_PER_HSM — effectively O(1).
+     * Intentional: Q_ASSERT on duplicate (fail-fast).
+     */
     {
         OS_I16 cur = me->TimerHead;
         while (cur >= 0) {
@@ -206,12 +260,18 @@ OS_TimerHandle OS_TimerCreate(OS_Signal signal,
     idx      = (OS_U16)FreeHead;
     FreeHead = Pool[idx].NextFree;
 
-    Pool[idx].Expiry     = TickCounter + periodMs;
-    Pool[idx].Period     = periodic ? periodMs : 0U;
+    /* Generation: always >= 1; skip 0 on wrap to distinguish from INVALID. */
+    newGen = Pool[idx].Generation + 1U;
+    if (newGen == 0U) {
+        newGen = 1U;
+    }
+    Pool[idx].Generation = newGen;
+
+    Pool[idx].Expiry     = TickCounter + periodTicks;
+    Pool[idx].Period     = periodic ? periodTicks : 0U;
     Pool[idx].Signal     = signal;
     Pool[idx].Hook       = me;
     Pool[idx].OwnerState = me->State[OS_HsmGetDispatchDepth()];
-    Pool[idx].Generation = Pool[idx].Generation + 1U;
     Pool[idx].Active     = true;
 
     /* Insert at head of per-HSM list – O(1). */
@@ -221,8 +281,9 @@ OS_TimerHandle OS_TimerCreate(OS_Signal signal,
         Pool[(OS_U16)me->TimerHead].PrevHsm = (OS_I16)idx;
     }
     me->TimerHead = (OS_I16)idx;
+    me->TimerCount++;
 
-    /* Insert into timing-wheel slot – O(1). */
+    /* Insert into timing-wheel slot (computes Round) – O(1). */
     WheelInsert(idx);
 
     handle.Index      = idx;
@@ -234,11 +295,14 @@ OS_TimerHandle OS_TimerCreate(OS_Signal signal,
 }
 
 /* ------------------------------------------------------------------ */
-void OS_TimerDelete(OS_TimerHandle handle)
+bool OS_TimerDelete(OS_TimerHandle handle)
 {
     TimerBlock *t;
+    bool        deleted = false;
 
-    Q_ASSERT(handle.Index < (OS_U16)OS_MAX_TIMERS);
+    if (handle.Index >= (OS_U16)OS_TIMER_WHEEL_SIZE) {
+        return false;   /* Index out of range — stale handle. */
+    }
 
     Port_CriticalEnter();
 
@@ -252,12 +316,19 @@ void OS_TimerDelete(OS_TimerHandle handle)
                  == t->Hook->State[OS_HsmGetDispatchDepth()]);
 
         TimerFree(handle.Index);
+        deleted = true;
     }
+    /* If handle is stale (timer expired or already deleted): return false
+     * without asserting.  This is the correct behaviour — the signal may
+     * already be in the queue, but no further action is needed. */
 
     Port_CriticalExit();
+
+    return deleted;
 }
 
 /* ------------------------------------------------------------------ */
+/* OS-internal: declared in OS_Timer_Private.h, not in public header. */
 void OS_TimerDeleteByState(void)
 {
     OS_Hsm         *hook;
@@ -293,19 +364,30 @@ void OS_SysTick(void)
 
     TickCounter++;
 
-    /* Inspect the single wheel slot for this tick – O(1). */
+    /*
+     * Inspect the single wheel slot for this tick – O(1).
+     * For each timer in the slot:
+     *   Round > 0  → decrement (one fewer rotation to go).
+     *   Round == 0 → timer expired: insert event, reschedule/free.
+     *
+     * The critical section covers only event insertion and wheel
+     * updates (no dispatch).  This is the highest-priority ISR.
+     */
     slot = (OS_U16)(TickCounter & (OS_U32)OS_TIMER_WHEEL_MASK);
     cur  = Wheel[slot];
 
     while (cur >= 0) {
         next = Pool[(OS_U16)cur].NextWheel;
 
-        if (TickLeq(Pool[(OS_U16)cur].Expiry, TickCounter)) {
+        if (Pool[(OS_U16)cur].Round > 0U) {
+            Pool[(OS_U16)cur].Round--;
+        } else {
+            /* Timer expired: insert event into queue (no dispatch). */
             OS_InsertEventFromIsr(Pool[(OS_U16)cur].Signal,
                                   Pool[(OS_U16)cur].Hook);
 
             if (Pool[(OS_U16)cur].Period > 0U) {
-                /* Periodic: move to the new wheel slot – O(1). */
+                /* Periodic: reschedule — move to the new wheel slot. */
                 WheelRemove((OS_U16)cur);
                 Pool[(OS_U16)cur].Expiry =
                     Pool[(OS_U16)cur].Expiry + Pool[(OS_U16)cur].Period;
@@ -318,35 +400,20 @@ void OS_SysTick(void)
         cur = next;
     }
 
-    WatchdogTick();
+    OS_WatchdogTick();
 
     Port_CriticalExit();
-}
-
-/* ------------------------------------------------------------------ */
-void OS_WatchdogInit(OS_U32 timeoutMs)
-{
-    Port_CriticalEnter();
-    WdgTimeout = timeoutMs;
-    WdgCounter = timeoutMs;
-    WdgEnabled = true;
-    Port_CriticalExit();
-
-    Port_WatchdogInit(timeoutMs);
-}
-
-/* ------------------------------------------------------------------ */
-void OS_WatchdogFeed(void)
-{
-    Port_CriticalEnter();
-    WdgCounter = WdgTimeout;
-    Port_CriticalExit();
-
-    Port_WatchdogFeed();
 }
 
 /* ------------------------------------------------------------------ */
 OS_U32 OS_GetTickCount(void)
 {
-    return TickCounter;
+    OS_U32 count;
+
+    /* Critical section for atomic read on 8/16-bit platforms. */
+    Port_CriticalEnter();
+    count = TickCounter;
+    Port_CriticalExit();
+
+    return count;
 }

@@ -10,7 +10,7 @@ builddir = build
 os_inc   = -Ios/inc
 
 # ---- OS sources ---------------------------------------------------
-os_src = os/src/OS_Error.c os/src/OS_Event.c os/src/OS_Timer.c os/src/OS_Hsm.c
+os_src = os/src/OS_Error.c os/src/OS_Event.c os/src/OS_Timer.c os/src/OS_Hsm.c os/src/OS_Watchdog.c
 
 # ---- Linux port sources -------------------------------------------
 linux_src = port/linux/OS_Port_Linux.c port/linux/main.c
@@ -43,6 +43,7 @@ rule all_cmd
     && $cc $cflags $os_inc -c -o $builddir/os/OS_Event.o  os/src/OS_Event.c $
     && $cc $cflags $os_inc -c -o $builddir/os/OS_Timer.o  os/src/OS_Timer.c $
     && $cc $cflags $os_inc -c -o $builddir/os/OS_Hsm.o    os/src/OS_Hsm.c $
+    && $cc $cflags $os_inc -c -o $builddir/os/OS_Watchdog.o os/src/OS_Watchdog.c $
     && $cc $cflags $os_inc -c -o $builddir/port/linux/OS_Port_Linux.o port/linux/OS_Port_Linux.c $
     && $cc $cflags $os_inc -c -o $builddir/port/linux/main.o          port/linux/main.c $
     && $cc -lpthread -o $builddir/linux_app $
@@ -50,6 +51,7 @@ rule all_cmd
          $builddir/os/OS_Event.o $
          $builddir/os/OS_Timer.o $
          $builddir/os/OS_Hsm.o $
+         $builddir/os/OS_Watchdog.o $
          $builddir/port/linux/OS_Port_Linux.o $
          $builddir/port/linux/main.o $
     && ./$builddir/linux_app
@@ -72,6 +74,9 @@ build $builddir/os/OS_Timer.o: cc_obj os/src/OS_Timer.c
 build $builddir/os/OS_Hsm.o: cc_obj os/src/OS_Hsm.c
   includes = $os_inc
 
+build $builddir/os/OS_Watchdog.o: cc_obj os/src/OS_Watchdog.c
+  includes = $os_inc
+
 build $builddir/port/linux/OS_Port_Linux.o: cc_obj port/linux/OS_Port_Linux.c
   includes = $os_inc
 
@@ -87,6 +92,7 @@ build $builddir/linux_app: link $
   $builddir/os/OS_Event.o $
   $builddir/os/OS_Timer.o $
   $builddir/os/OS_Hsm.o   $
+  $builddir/os/OS_Watchdog.o $
   $builddir/port/linux/OS_Port_Linux.o $
   $builddir/port/linux/main.o
   ldflags = -lpthread

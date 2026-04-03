@@ -3,7 +3,7 @@
  * @brief Hierarchical State Machine engine implementation.
  */
 #include "OS_Hsm.h"
-#include "OS_Timer.h"
+#include "OS_Timer_Private.h"
 #include "OS_Error.h"
 #include "OS_Port.h"
 
@@ -54,6 +54,7 @@ void OS_HsmInit(OS_Hsm *me, OS_StateHandler topState)
     me->Depth       = 0U;
     me->Initialized = true;
     me->TimerHead   = -1;
+    me->TimerCount  = 0U;
     me->State[0]    = topState;
 
     for (i = 1U; i < (OS_U8)OS_HSM_MAX_DEPTH; i++) {
