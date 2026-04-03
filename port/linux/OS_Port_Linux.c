@@ -93,10 +93,10 @@ void Port_SysTickStop(void)
     (void)pthread_join(TickThread, (void **)0);
 }
 
-void Port_WatchdogInit(OS_U32 timeoutMs)
+void Port_WatchdogInit(OS_U32 timeoutTicks)
 {
     /* No hardware watchdog on Linux – handled entirely in software. */
-    (void)timeoutMs;
+    (void)timeoutTicks;
 }
 
 void Port_WatchdogFeed(void)

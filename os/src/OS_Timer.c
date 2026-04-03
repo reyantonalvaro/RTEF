@@ -65,6 +65,8 @@ _Static_assert(OS_TIMER_MAX_PER_HSM <= OS_TIMER_WHEEL_SIZE,
                "OS_TIMER_MAX_PER_HSM cannot exceed OS_TIMER_WHEEL_SIZE");
 _Static_assert(OS_TIMER_MAX_PER_HSM >= 1U,
                "OS_TIMER_MAX_PER_HSM must be at least 1");
+_Static_assert(OS_TIMER_MAX_PER_HSM <= 255U,
+               "OS_TIMER_MAX_PER_HSM must fit in OS_U8 (TimerCount)");
 
 /* ------------------------------------------------------------------ */
 /*  Timer block                                                       */
