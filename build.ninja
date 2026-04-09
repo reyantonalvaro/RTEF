@@ -1,7 +1,7 @@
 # ===================================================================
 #  RTEF OS – build.ninja
 #  Toolchain : clang + system linker
-#  Targets   : clean, compile (default), run, all
+#  Targets   : clean, compile (default), run, benchmark, all
 # ===================================================================
 
 cc       = clang
@@ -54,8 +54,10 @@ rule all_cmd
          $builddir/os/OS_Watchdog.o $
          $builddir/port/linux/OS_Port_Linux.o $
          $builddir/port/linux/main.o $
-    && ./$builddir/linux_app
-  description = CLEAN + COMPILE + RUN
+    && ./$builddir/linux_app $
+    && python3 benchmark/rtef_benchmark.py --cc $cc $
+         --cflags "$cflags" --inc="$os_inc"
+  description = CLEAN + COMPILE + RUN + BENCHMARK
   pool = console
 
 # ===================================================================
@@ -96,6 +98,18 @@ build $builddir/linux_app: link $
   $builddir/port/linux/OS_Port_Linux.o $
   $builddir/port/linux/main.o
   ldflags = -lpthread
+
+# ===================================================================
+#  Benchmark
+# ===================================================================
+
+rule benchmark_cmd
+  command = python3 benchmark/rtef_benchmark.py --cc $cc $
+    --cflags "$cflags" --inc="$os_inc"
+  description = BENCHMARK  Assembly analysis
+  pool = console
+
+build benchmark: benchmark_cmd | $builddir/linux_app
 
 # ===================================================================
 #  Phony targets
