@@ -13,6 +13,7 @@
  * Operations:
  *   - OS_TimerCreate      : O(1) alloc + wheel insert.
  *   - OS_TimerDelete      : O(1) doubly-linked unlink.
+ *   - OS_TimerRestart     : O(1) wheel remove + reinsert (no alloc).
  *   - OS_SysTick          : O(1) — one slot per tick, at most
  *                           OS_TIMER_WHEEL_SIZE timers per slot.
  *   - OS_TimerDeleteByState: O(m) in timers owned by that state,
@@ -347,6 +348,45 @@ bool OS_TimerDelete(OS_TimerHandle handle)
     Port_CriticalExit();
 
     return deleted;
+}
+
+/* ------------------------------------------------------------------ */
+bool OS_TimerRestart(OS_TimerHandle handle, OS_U32 newPeriodTicks)
+{
+    TimerBlock *t;
+    bool        restarted = false;
+
+    Q_ASSERT(newPeriodTicks > 0U);
+
+    if (handle.Index >= (OS_U16)OS_TIMER_WHEEL_SIZE) {
+        return false;
+    }
+
+    Port_CriticalEnter();
+
+    t = &Pool[handle.Index];
+
+    if (t->Active && (t->Generation == handle.Generation)) {
+        /* Protection: only the owning state may restart. */
+        Q_ASSERT(OS_HsmInDispatch());
+        Q_ASSERT(t->Hook == OS_HsmGetCurrent());
+        Q_ASSERT(t->OwnerState
+                 == t->Hook->State[OS_HsmGetDispatchDepth()]);
+
+        /* Move to the new wheel slot without touching free/HSM lists. */
+        WheelRemove(handle.Index);
+        t->Expiry = TickCounter + newPeriodTicks;
+        if (t->Period > 0U) {
+            t->Period = newPeriodTicks;
+        }
+        WheelInsert(handle.Index);
+
+        restarted = true;
+    }
+
+    Port_CriticalExit();
+
+    return restarted;
 }
 
 /* ------------------------------------------------------------------ */
