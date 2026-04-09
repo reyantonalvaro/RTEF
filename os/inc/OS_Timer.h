@@ -85,6 +85,24 @@ OS_TimerHandle OS_TimerCreate(OS_Signal signal,
 bool OS_TimerDelete(OS_TimerHandle handle);
 
 /**
+ * @brief Restart an active timer with a new period, reusing the same slot.
+ *
+ * Avoids the overhead of OS_TimerDelete + OS_TimerCreate when a state
+ * needs to reset a timeout (e.g. on receiving an event).  The handle
+ * remains valid (same Index and Generation).
+ *
+ * Only the state that created the timer may restart it.
+ * If the handle is stale (timer already expired or deleted), the
+ * function returns false without asserting — same as OS_TimerDelete.
+ *
+ * @param handle          Handle previously returned by OS_TimerCreate.
+ * @param newPeriodTicks  New timeout / period in OS ticks (> 0).
+ * @return                true  = timer was found and restarted.
+ *                        false = handle is stale; timer is already gone.
+ */
+bool OS_TimerRestart(OS_TimerHandle handle, OS_U32 newPeriodTicks);
+
+/**
  * @brief 1-tick system-tick handler.  Call from the HW timer ISR.
  *
  * Inserts expired-timer events into the queue only; does not dispatch.

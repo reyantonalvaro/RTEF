@@ -199,7 +199,7 @@ bool OS_TimerIsActive(OS_TimerHandle handle)
 
 **Prioridad:** Media. Es una funcionalidad útil que falta.
 
-### 4.3 📋 Considerar `OS_TimerRestart(handle, newPeriod)` para evitar delete+create
+### 4.3 ✅ ~~Considerar `OS_TimerRestart(handle, newPeriod)` para evitar delete+create~~ — IMPLEMENTADO
 
 **Motivación:** Si un estado quiere reiniciar un timer (ej: resetear un timeout al recibir un evento), actualmente necesita:
 
