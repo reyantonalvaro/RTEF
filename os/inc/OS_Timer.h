@@ -91,6 +91,11 @@ bool OS_TimerDelete(OS_TimerHandle handle);
  * needs to reset a timeout (e.g. on receiving an event).  The handle
  * remains valid (same Index and Generation).
  *
+ * The timer type (one-shot / periodic) is preserved.  For periodic
+ * timers the reload value is also updated to @p newPeriodTicks.
+ * For one-shot timers only the expiry is reset; the timer remains
+ * one-shot.  To change the timer type, delete and recreate.
+ *
  * Only the state that created the timer may restart it.
  * If the handle is stale (timer already expired or deleted), the
  * function returns false without asserting — same as OS_TimerDelete.
