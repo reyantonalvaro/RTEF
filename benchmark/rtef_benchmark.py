@@ -215,7 +215,7 @@ def _get_mnemonic(line: str) -> str | None:
 
 def _is_memory_operand(operand: str) -> bool:
     """Check if an operand references memory (has parentheses or offset)."""
-    return "(" in operand or "%" not in operand
+    return "(" in operand or ("%" not in operand and "$" not in operand)
 
 
 def _is_indirect_target(line: str) -> bool:
@@ -276,8 +276,7 @@ def compute_metrics(func: FunctionMetrics) -> None:
                             break
 
         # ── Branch / pipeline flush detection ──
-        is_branch = mnemonic.startswith("j") and mnemonic != "jmp"
-        is_cond_branch = is_branch
+        is_cond_branch = mnemonic.startswith("j") and mnemonic != "jmp"
         is_loop = mnemonic.startswith("loop")
 
         if is_cond_branch or is_loop:
@@ -400,7 +399,7 @@ def print_table(metrics: list[FunctionMetrics]) -> None:
     total_flushes = sum(m.pipeline_flushes for m in metrics)
 
     print()
-    print(f"  Total functions analysed : {len(metrics)}")
+    print(f"  Total functions analyzed  : {len(metrics)}")
     print(f"  Total instructions       : {total_instr}")
     print(f"  Total estimated cycles   : {total_cycles}")
     print(f"  Average cache score      : {avg_cache:.1f}/10")
