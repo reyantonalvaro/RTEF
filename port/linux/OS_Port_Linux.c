@@ -5,7 +5,8 @@
  * Implements the OS_Port.h interface using pthreads for the critical
  * section and a dedicated thread for the 1 ms SysTick.
  */
-#define _POSIX_C_SOURCE 199309L
+#define _POSIX_C_SOURCE 200112L
+#define _XOPEN_SOURCE   600
 
 #include "OS_Port.h"
 #include "OS_Timer.h"
@@ -20,7 +21,7 @@
 /*  Module-private state                                              */
 /* ------------------------------------------------------------------ */
 
-static pthread_mutex_t CritMutex    = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t CritMutex;
 static pthread_t       TickThread;
 static volatile bool   TickRunning  = false;
 
@@ -52,7 +53,11 @@ static void *SysTickTask(void *arg)
 
 void Port_Init(void)
 {
-    /* Mutex already statically initialised. */
+    pthread_mutexattr_t attr;
+    (void)pthread_mutexattr_init(&attr);
+    (void)pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    (void)pthread_mutex_init(&CritMutex, &attr);
+    (void)pthread_mutexattr_destroy(&attr);
 }
 
 void Port_CriticalEnter(void)

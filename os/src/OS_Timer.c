@@ -310,7 +310,7 @@ void OS_SysTick(void)
         if (t->Round > 0U) {
             t->Round--;
         } else {
-            OS_InsertEventFromIsr(t->Signal, t->Hook);
+            OS_InsertEvent(t->Signal, t->Hook);
             if (t->Period > 0U) {
                 WheelRemove((OS_U16)cur);
                 t->Expiry += t->Period;
