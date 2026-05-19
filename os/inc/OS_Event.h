@@ -8,11 +8,6 @@
 #include "OS_Types.h"
 
 /**
- * @brief Initialise the event queue.  Call once at start-up.
- */
-void OS_EventInit(void);
-
-/**
  * @brief Insert an event into the queue.
  *
  * Callable from any context: task / HSM state handler / ISR / SysTick.

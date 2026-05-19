@@ -13,17 +13,11 @@ typedef struct {
     OS_Hsm    *Hook;
 } EventEntry;
 
+/* Static storage: BSS-zeroed at startup (Head = Tail = Count = 0). */
 static EventEntry Queue[OS_MAX_EVENTS];
 static OS_U16     Head;
 static OS_U16     Tail;
 static OS_U16     Count;
-
-void OS_EventInit(void)
-{
-    Head  = 0U;
-    Tail  = 0U;
-    Count = 0U;
-}
 
 void OS_InsertEvent(OS_Signal signal, OS_Hsm *hook)
 {
