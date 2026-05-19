@@ -99,7 +99,6 @@ int main(void)
     (void)printf("=== RTEF OS - Traffic Light Demo ===\n\n");
 
     Port_Init();
-    OS_EventInit();
     OS_TimerInit();
     OS_HsmInit(&TrafficLight, StateOperating);
     Port_SysTickStart();
