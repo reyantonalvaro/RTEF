@@ -33,8 +33,15 @@
 /*  Event queue                                                       */
 /* ------------------------------------------------------------------ */
 
-/** @brief Maximum events in the queue (must be a power of two). */
-#define OS_MAX_EVENTS        32U
+/**
+ * @brief Maximum events in the queue (must be a power of two).
+ *
+ * Bumped from 32 to 512 to absorb bursts (e.g. several timers and
+ * ISRs posting in the same tick) without ever hitting the overflow
+ * Q_ASSERT. Sized at design time — no runtime occupancy metric is
+ * tracked by the event module (intentional, see OS_Event.c).
+ */
+#define OS_MAX_EVENTS        512U
 
 /** @brief Bit-mask for O(1) circular-buffer indexing. */
 #define OS_EVENT_MASK        (OS_MAX_EVENTS - 1U)

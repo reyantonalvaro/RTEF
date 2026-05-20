@@ -104,7 +104,11 @@ int main(void)
     Port_SysTickStart();
 
     while (OS_GetTickCount() < (OS_U32)DEMO_DURATION_MS) {
-        OS_EventDispatch();
+        /* Drain all pending events, then sleep until the next tick or
+         * ISR. OS_EventDispatch returns false when the queue is empty,
+         * which is what enables the idle wait below (no busy-poll). */
+        while (OS_EventDispatch()) {
+        }
         (void)nanosleep(&idle, (struct timespec *)0);
     }
 

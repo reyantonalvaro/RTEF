@@ -38,9 +38,16 @@ enum {
 /*  Event                                                             */
 /* ------------------------------------------------------------------ */
 
-/** @brief Lightweight event passed to every state handler. */
+/**
+ * @brief Lightweight event passed to every state handler.
+ *
+ * Param was added so events can carry a small payload (a value, a
+ * handle, a packed status) without exposing globals to handlers.
+ * System signals (Q_ENTRY/Q_EXIT/Q_INIT) always use Param == 0.
+ */
 typedef struct {
     OS_Signal Signal;
+    OS_U32    Param;
 } OS_Event;
 
 /* ------------------------------------------------------------------ */
