@@ -28,10 +28,10 @@ static OS_U16     Head;
 static OS_U16     Tail;
 static OS_U16     Count;
 
-/* High-water mark of Count since boot. Not exported through the API
- * (the public API stays at insert + dispatch). Read it from the
- * debugger to size OS_MAX_EVENTS empirically. */
-static OS_U16     CountMax;
+/* Design decision: NO high-water-mark / occupancy metric is tracked.
+ * Sizing OS_MAX_EVENTS is handled at design time, not by runtime
+ * telemetry. Keeping the module to the strict minimum (insert +
+ * dispatch state only) is an explicit requirement. */
 
 void OS_InsertEvent(OS_Signal signal, OS_U32 param, OS_Hsm *hook)
 {
@@ -54,9 +54,6 @@ void OS_InsertEvent(OS_Signal signal, OS_U32 param, OS_Hsm *hook)
     Queue[Head].Hook   = hook;
     Head  = (Head + 1U) & (OS_U16)OS_EVENT_MASK;
     Count++;
-    if (Count > CountMax) {
-        CountMax = Count;       /* watermark for offline sizing */
-    }
 
     Port_CriticalExit();
 }

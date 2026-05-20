@@ -38,8 +38,8 @@
  *
  * Bumped from 32 to 512 to absorb bursts (e.g. several timers and
  * ISRs posting in the same tick) without ever hitting the overflow
- * Q_ASSERT. Sized for OS_U16 indices; tune with the CountMax
- * watermark inside OS_Event.c.
+ * Q_ASSERT. Sized at design time — no runtime occupancy metric is
+ * tracked by the event module (intentional, see OS_Event.c).
  */
 #define OS_MAX_EVENTS        512U
 
