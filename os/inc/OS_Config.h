@@ -33,7 +33,14 @@
 /*  Event queue                                                       */
 /* ------------------------------------------------------------------ */
 
-/** @brief Maximum events in the queue (must be a power of two). */
+/**
+ * @brief Maximum events in the queue (must be a power of two).
+ *
+ * Bumped from 32 to 512 to absorb bursts (e.g. several timers and
+ * ISRs posting in the same tick) without ever hitting the overflow
+ * Q_ASSERT. Sized for OS_U16 indices; tune with the CountMax
+ * watermark inside OS_Event.c.
+ */
 #define OS_MAX_EVENTS        512U
 
 /** @brief Bit-mask for O(1) circular-buffer indexing. */

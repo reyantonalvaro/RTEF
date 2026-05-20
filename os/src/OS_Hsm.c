@@ -11,7 +11,8 @@ static OS_Hsm *CurrentHsm           = (OS_Hsm *)0;
 static OS_U8   CurrentDispatchDepth = 0U;
 static bool    Dispatching          = false;
 
-/* Dispatch one system signal (Q_ENTRY/Q_EXIT/Q_INIT) at a given depth. */
+/* Dispatch one system signal (Q_ENTRY/Q_EXIT/Q_INIT) at a given depth.
+ * System signals never carry a payload, so Param is forced to 0. */
 static void DispatchSysSignal(OS_Hsm *me, OS_U8 depth, OS_Signal signal)
 {
     OS_Event const e = { signal, 0U };
@@ -91,6 +92,8 @@ void OS_HsmTransition(OS_Hsm *me, OS_StateHandler target)
     EnterState(me, transDepth);
 }
 
+/* Param is plumbed through from OS_InsertEvent so the handler sees
+ * exactly what the producer posted (no payload-via-globals). */
 void OS_HsmDispatch(OS_Hsm *me, OS_Signal signal, OS_U32 param)
 {
     OS_Event const e = { signal, param };

@@ -310,6 +310,7 @@ void OS_SysTick(void)
         if (t->Round > 0U) {
             t->Round--;
         } else {
+            /* Timers don't carry a per-fire payload, so pass 0. */
             OS_InsertEvent(t->Signal, 0U, t->Hook);
             if (t->Period > 0U) {
                 WheelRemove((OS_U16)cur);
