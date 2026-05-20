@@ -104,7 +104,9 @@ int main(void)
     Port_SysTickStart();
 
     while (OS_GetTickCount() < (OS_U32)DEMO_DURATION_MS) {
-        OS_EventDispatch();
+        while (OS_EventDispatch()) {
+            /* drain pending events */
+        }
         (void)nanosleep(&idle, (struct timespec *)0);
     }
 

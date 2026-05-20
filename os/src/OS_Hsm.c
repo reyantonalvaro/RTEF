@@ -14,7 +14,7 @@ static bool    Dispatching          = false;
 /* Dispatch one system signal (Q_ENTRY/Q_EXIT/Q_INIT) at a given depth. */
 static void DispatchSysSignal(OS_Hsm *me, OS_U8 depth, OS_Signal signal)
 {
-    OS_Event const e = { signal };
+    OS_Event const e = { signal, 0U };
     CurrentDispatchDepth = depth;
     (void)me->State[depth](me, &e);
 }
@@ -91,9 +91,9 @@ void OS_HsmTransition(OS_Hsm *me, OS_StateHandler target)
     EnterState(me, transDepth);
 }
 
-void OS_HsmDispatch(OS_Hsm *me, OS_Signal signal)
+void OS_HsmDispatch(OS_Hsm *me, OS_Signal signal, OS_U32 param)
 {
-    OS_Event const e = { signal };
+    OS_Event const e = { signal, param };
     OS_I8          d;
 
     Q_ASSERT(me != (OS_Hsm *)0);

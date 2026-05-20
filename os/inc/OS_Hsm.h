@@ -72,8 +72,9 @@ void OS_HsmTransition(OS_Hsm *me, OS_StateHandler target);
  * @brief Dispatch a signal to an HSM (called by OS_EventDispatch).
  * @param me      HSM instance.
  * @param signal  Signal to dispatch.
+ * @param param   32-bit payload (0 for events without payload).
  */
-void OS_HsmDispatch(OS_Hsm *me, OS_Signal signal);
+void OS_HsmDispatch(OS_Hsm *me, OS_Signal signal, OS_U32 param);
 
 /**
  * @brief Get the HSM currently being dispatched (NULL when idle).

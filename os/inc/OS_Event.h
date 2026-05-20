@@ -15,13 +15,25 @@
  * caller already holds it (port lock is reentrant).
  *
  * @param signal  Signal identifier (>= Q_USER for user signals).
+ * @param param   Optional 32-bit payload (use 0 when unused).
  * @param hook    Target HSM instance.
  */
-void OS_InsertEvent(OS_Signal signal, OS_Hsm *hook);
+void OS_InsertEvent(OS_Signal signal, OS_U32 param, OS_Hsm *hook);
 
 /**
- * @brief Dequeue and dispatch one event.  Called from the main loop.
+ * @brief Dequeue and dispatch one event. Called from the main loop.
+ *
+ * @return true  if an event was dispatched,
+ *         false if the queue was empty (caller may sleep / WFI).
  */
-void OS_EventDispatch(void);
+bool OS_EventDispatch(void);
+
+/**
+ * @brief Highest queue occupancy reached since boot.
+ *
+ * Use to size OS_MAX_EVENTS empirically. Read at any time; updated
+ * inside the queue's critical section.
+ */
+OS_U16 OS_EventQueueHighWater(void);
 
 #endif /* OS_EVENT_H */

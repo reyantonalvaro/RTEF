@@ -34,7 +34,7 @@
 /* ------------------------------------------------------------------ */
 
 /** @brief Maximum events in the queue (must be a power of two). */
-#define OS_MAX_EVENTS        32U
+#define OS_MAX_EVENTS        512U
 
 /** @brief Bit-mask for O(1) circular-buffer indexing. */
 #define OS_EVENT_MASK        (OS_MAX_EVENTS - 1U)

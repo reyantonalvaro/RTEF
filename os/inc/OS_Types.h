@@ -41,6 +41,7 @@ enum {
 /** @brief Lightweight event passed to every state handler. */
 typedef struct {
     OS_Signal Signal;
+    OS_U32    Param;
 } OS_Event;
 
 /* ------------------------------------------------------------------ */
