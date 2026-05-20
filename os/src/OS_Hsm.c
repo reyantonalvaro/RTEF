@@ -92,7 +92,7 @@ void OS_HsmTransition(OS_Hsm *me, OS_StateHandler target)
     EnterState(me, transDepth);
 }
 
-/* Param is plumbed through from OS_InsertEvent so the handler sees
+/* Param is plumbed through from the event queue so the handler sees
  * exactly what the producer posted (no payload-via-globals). */
 void OS_HsmDispatch(OS_Hsm *me, OS_Signal signal, OS_U32 param)
 {

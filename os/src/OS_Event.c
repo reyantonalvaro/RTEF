@@ -3,6 +3,7 @@
  * @brief Fixed-size ring-buffer event queue – O(1) insert and dispatch.
  */
 #include "OS_Event.h"
+#include "OS_Event_Private.h"
 #include "OS_Error.h"
 #include "OS_Hsm.h"
 #include "OS_Config.h"
@@ -33,7 +34,7 @@ static OS_U16     Count;
  * telemetry. Keeping the module to the strict minimum (insert +
  * dispatch state only) is an explicit requirement. */
 
-void OS_InsertEvent(OS_Signal signal, OS_U32 param, OS_Hsm *hook)
+void OS_InsertEventForHsm(OS_Signal signal, OS_U32 param, OS_Hsm *hook)
 {
     /* Hook validation does not touch queue state, so do it before
      * disabling interrupts — keeps the critical section short and
@@ -56,6 +57,16 @@ void OS_InsertEvent(OS_Signal signal, OS_U32 param, OS_Hsm *hook)
     Count++;
 
     Port_CriticalExit();
+}
+
+void OS_InsertEvent(OS_Signal signal, OS_U32 param)
+{
+    /* The target is always the currently dispatching HSM, so an HSM
+     * structurally cannot post into another HSM's mailbox. Callable
+     * only from a state handler or HSM init — OS_HsmGetCurrent()
+     * returns NULL otherwise and the assert in OS_InsertEventForHsm
+     * fires. */
+    OS_InsertEventForHsm(signal, param, OS_HsmGetCurrent());
 }
 
 bool OS_EventDispatch(void)

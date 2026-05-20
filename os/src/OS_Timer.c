@@ -23,6 +23,7 @@
 #include "OS_Timer_Private.h"
 #include "OS_Watchdog_Private.h"
 #include "OS_Event.h"
+#include "OS_Event_Private.h"
 #include "OS_Error.h"
 #include "OS_Hsm.h"
 #include "OS_Config.h"
@@ -310,8 +311,12 @@ void OS_SysTick(void)
         if (t->Round > 0U) {
             t->Round--;
         } else {
-            /* Timers don't carry a per-fire payload, so pass 0. */
-            OS_InsertEvent(t->Signal, 0U, t->Hook);
+            /* Timers don't carry a per-fire payload, so pass 0.
+             * Tick context has no current HSM, so use the OS-internal
+             * targeted insert with the timer's owning hook. This is
+             * still a deferred self-post: the HSM that armed the
+             * timer is also the receiver. */
+            OS_InsertEventForHsm(t->Signal, 0U, t->Hook);
             if (t->Period > 0U) {
                 WheelRemove((OS_U16)cur);
                 t->Expiry += t->Period;
